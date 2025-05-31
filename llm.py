@@ -2,10 +2,15 @@
 import json
 import os
 import re
+import requests
+import logging
 
 import anthropic
 import backoff
 import openai
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 MAX_OUTPUT_TOKENS = 4096
 AVAILABLE_LLMS = [
@@ -39,6 +44,7 @@ AVAILABLE_LLMS = [
     "deepseek-chat",
     "deepseek-coder",
     "deepseek-reasoner",
+    "deepseek/deepseek-r1-0528:free",
 ]
 
 def create_client(model: str):
@@ -81,6 +87,9 @@ def create_client(model: str):
             api_key=os.environ["OPENROUTER_API_KEY"],
             base_url="https://openrouter.ai/api/v1"
         ), model
+    elif model == "deepseek/deepseek-r1-0528:free":
+        print("Using requests for DeepSeek-R1-0528 via OpenRouter.")
+        return "requests", model
     else:
         raise ValueError(f"Model {model} not supported.")
 
@@ -138,6 +147,31 @@ def get_batch_responses_from_llm(
         new_msg_history = [
             new_msg_history + [{"role": "assistant", "content": c}] for c in content
         ]
+    elif model == "deepseek/deepseek-r1-0528:free":
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        headers = {
+            "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://yourdomain.com",  # Optional
+            "X-Title": "YourAppName",  # Optional
+        }
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ]
+        }
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            data=json.dumps(payload)
+        )
+        result = response.json()
+        content = [result["choices"][0]["message"]["content"]]
+        new_msg_history = [
+            new_msg_history + [{"role": "assistant", "content": content[0]}]
+        ]
     else:
         content, new_msg_history = [], []
         for _ in range(n_responses):
@@ -173,13 +207,23 @@ def get_response_from_llm(
         msg,
         client,
         model,
-        system_message,
+        system_message=None,
         print_debug=False,
         msg_history=None,
         temperature=0.7,
 ):
     if msg_history is None:
         msg_history = []
+
+    # Use Atlas system prompt by default if none provided
+    if system_message is None:
+        try:
+            with open("atlas_sysprompt.txt", "r") as f:
+                system_message = f.read()
+            logger.info("Using Atlas system prompt from atlas_sysprompt.txt")
+        except FileNotFoundError:
+            logger.warning("atlas_sysprompt.txt not found, using default system message")
+            system_message = "You are a helpful AI assistant."
 
     if "claude" in model:
         new_msg_history = msg_history + [
@@ -291,6 +335,29 @@ def get_response_from_llm(
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
         resoning_content = response.choices[0].message.reasoning_content
+    elif model == "deepseek/deepseek-r1-0528:free":
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        headers = {
+            "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://yourdomain.com",  # Optional
+            "X-Title": "YourAppName",  # Optional
+        }
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ]
+        }
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            data=json.dumps(payload)
+        )
+        result = response.json()
+        content = result["choices"][0]["message"]["content"]
+        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     else:
         raise ValueError(f"Model {model} not supported.")
     if print_debug:
