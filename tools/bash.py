@@ -38,7 +38,7 @@ class BashSession:
         if self._started:
             return
         self._process = await asyncio.create_subprocess_shell(
-            "/bin/bash -i",
+            "/bin/bash --noprofile --norc -i",  # Added --noprofile --norc to suppress startup messages
             preexec_fn=os.setsid,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
@@ -79,32 +79,33 @@ class BashSession:
         try:
             output = ''
             start_time = asyncio.get_event_loop().time()
-            
+            found_sentinel = False
             while True:
                 if asyncio.get_event_loop().time() - start_time > self._timeout:
                     self._timed_out = True
                     raise ValueError(
                         f"Timed out: bash has not returned in {self._timeout} seconds and must be restarted."
                     )
-                
                 await asyncio.sleep(self._output_delay)
-                # Read from the internal buffer
                 stdout_data = self._process.stdout._buffer.decode(errors='ignore')
                 stderr_data = self._process.stderr._buffer.decode(errors='ignore')
-                
                 if self._sentinel in stdout_data:
-                    output = stdout_data[: stdout_data.index(self._sentinel)]
+                    found_sentinel = True
                     break
-
+            # After breaking, sleep briefly and read any remaining output
+            await asyncio.sleep(0.1)
+            stdout_data = self._process.stdout._buffer.decode(errors='ignore')
+            output_lines = stdout_data.split('\n')
+            output = '\n'.join(line for line in output_lines 
+                                 if not line.startswith('bash-') and 
+                                 not line.startswith('\x1b') and
+                                 self._sentinel not in line)
             # Clear buffers
             self._process.stdout._buffer.clear()
             self._process.stderr._buffer.clear()
-
             output = output.strip()
-            error = stderr_data.strip()
-
+            error = filter_error(stderr_data)
             return output, error
-
         except Exception as e:
             self._timed_out = True
             raise ValueError(str(e))
@@ -116,6 +117,23 @@ def filter_error(error):
     error_lines = error.splitlines()
     while i < len(error_lines):
         line = error_lines[i]
+
+        # Skip shell startup messages and ioctl errors
+        if any(msg in line for msg in [
+            "zsh is now the default shell",
+            "Inappropriate ioctl for device",
+            "Welcome to",
+            "Last login:",
+            "bash-",
+            "\x1b[?1034h",
+            "<<exit>>",
+            "The default interactive shell is now zsh",
+            "To update your account to use zsh",
+            "For more details, please visit",
+            "Error:"
+        ]):
+            i += 1
+            continue
 
         # Skip the next lines if ioctl error, add relevant lines
         if "Inappropriate ioctl for device" in line:
@@ -142,10 +160,9 @@ async def tool_function_call(command):
 
         output, error = await bash_session.run(command)
         error = filter_error(error)
-        result = ""
-        if output:
-            result += output
-        if error:
+        result = output.strip()
+        # Only append error if it's non-empty, not a substring of output, and does not start with '>'
+        if error and error not in result and not error.lstrip().startswith('>'):
             result += "\nError:\n" + error
         return result.strip()
     except Exception as e:
