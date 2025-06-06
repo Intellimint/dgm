@@ -2,6 +2,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import docker
 
 from llm import create_client, get_response_from_llm, extract_json_between_markers
@@ -26,6 +27,47 @@ from utils.docker_utils import (
 
 dataset = None
 diagnose_model = 'deepseek/deepseek-r1-0528:free'
+
+
+def parse_test_results(test_output):
+    """Parse pytest output and return a summary of failing and errored tests."""
+    results = {"failed": [], "error": [], "passed": []}
+    pattern = re.compile(r"(\S+::\S+)\s+(PASSED|FAILED|ERROR)")
+    for line in test_output.splitlines():
+        match = pattern.search(line)
+        if match:
+            name, status = match.groups()
+            results[status.lower()].append(name)
+    return results
+
+
+def analyze_test_results(test_output):
+    """Analyze pytest output to extract failure messages and priorities."""
+    parsed = parse_test_results(test_output)
+    failures = parsed["failed"] + parsed["error"]
+    lines = test_output.splitlines()
+    analysis = []
+    error_pattern = re.compile(r"E\s+(.+)")
+    for test in failures:
+        msg = ""
+        try:
+            idx = next(i for i, l in enumerate(lines) if test in l)
+            for j in range(idx + 1, min(len(lines), idx + 10)):
+                m = error_pattern.search(lines[j])
+                if m:
+                    msg = m.group(1).strip()
+                    break
+        except StopIteration:
+            pass
+        analysis.append({"test": test, "error": msg})
+
+    counts = {}
+    for item in analysis:
+        counts[item["error"]] = counts.get(item["error"], 0) + 1
+    for item in analysis:
+        item["priority"] = counts[item["error"]]
+    analysis.sort(key=lambda x: x["priority"], reverse=True)
+    return analysis
 
 def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attempts=3, polyglot=False):
     client = create_client(diagnose_model)
@@ -304,52 +346,99 @@ def self_improve(
         test_output = output.decode()
         safe_log(f"Test output: {test_output}")
 
-        # Save test results
-        test_results_file = os.path.join(output_dir, "test_results.txt")
+        # Save raw test results
+        test_results_file = os.path.join(output_dir, "test_results_iter0.txt")
         with open(test_results_file, "w") as f:
             f.write(test_output)
 
-        # Get the problem description with test results context
-        safe_log("Getting problem description...")
-        problem_statement = diagnose_problem(
-            entry, parent_commit, "/app", output_dir,
-            patch_files=[], polyglot=polyglot
+        parsed_results = parse_test_results(test_output)
+        summary_lines = []
+        if parsed_results["failed"]:
+            summary_lines.append("Failing tests:")
+            summary_lines.extend(f"- {name}" for name in parsed_results["failed"])
+        if parsed_results["error"]:
+            summary_lines.append("Errored tests:")
+            summary_lines.extend(f"- {name}" for name in parsed_results["error"])
+        test_summary = "\n".join(summary_lines)
+        analysis = analyze_test_results(test_output)
+        analysis_summary = "\n".join(
+            f"{item['test']}: {item['error']} (priority {item['priority']})" for item in analysis
         )
-        if problem_statement is None:
-            safe_log("Failed to get problem statement")
-            return None
 
-        # Enhance problem statement with test results
-        enhanced_problem = f"""Problem Statement:
+        improvement_tracking = []
+        failing_tests = parsed_results["failed"] + parsed_results["error"]
+        iteration = 1
+
+        while failing_tests and iteration <= 3:
+            # Get the problem description with test results context
+            safe_log("Getting problem description...")
+            problem_statement = diagnose_problem(
+                entry, parent_commit, "/app", output_dir,
+                patch_files=[], polyglot=polyglot
+            )
+            if problem_statement is None:
+                safe_log("Failed to get problem statement")
+                return None
+
+            enhanced_problem = f"""Problem Statement:
 {problem_statement}
 
-Test Results:
+Test Summary:
+{test_summary}
+
+Failure Analysis:
+{analysis_summary}
+
+Full Test Output:
 {test_output}
 
-Based on these test results, please identify specific areas for improvement in the code and implement those improvements. Focus on:
-1. Performance optimizations
-2. Edge case handling
-3. Code maintainability
-4. Algorithm efficiency
-5. Error handling
+Provide concrete improvements to fix the failing tests above."""
 
-Provide concrete, implementable improvements that address the issues found in the test results."""
+            with open(os.path.join(output_dir, "enhanced_problem_statement.txt"), "w") as f:
+                f.write(enhanced_problem)
+            copy_to_container(container, os.path.join(output_dir, "enhanced_problem_statement.txt"), "/app/enhanced_problem_statement.txt")
 
-        # Save enhanced problem statement
-        with open(os.path.join(output_dir, "enhanced_problem_statement.txt"), "w") as f:
-            f.write(enhanced_problem)
+            safe_log(f"Running improvement iteration {iteration}...")
+            exit_code, output = container.exec_run(
+                f"python coding_agent.py --problem_statement_file enhanced_problem_statement.txt",
+                workdir="/app"
+            )
+            improvement_output = output.decode()
+            safe_log(f"Improvement output: {improvement_output}")
 
-        # Copy enhanced problem statement to container
-        copy_to_container(container, os.path.join(output_dir, "enhanced_problem_statement.txt"), "/app/enhanced_problem_statement.txt")
+            # Run tests again
+            exit_code, output = container.exec_run(
+                "python -m pytest test_problem.py -v",
+                workdir="/app"
+            )
+            test_output = output.decode()
+            safe_log(f"Iteration {iteration} test output: {test_output}")
+            with open(os.path.join(output_dir, f"test_results_iter{iteration}.txt"), "w") as f:
+                f.write(test_output)
 
-        # Run the improvement with enhanced problem statement
-        safe_log("Running improvement...")
-        exit_code, output = container.exec_run(
-            f"python coding_agent.py --problem_statement_file enhanced_problem_statement.txt",
-            workdir="/app"
-        )
-        improvement_output = output.decode()
-        safe_log(f"Improvement output: {improvement_output}")
+            new_results = parse_test_results(test_output)
+            new_failing = new_results["failed"] + new_results["error"]
+            fixed = [t for t in failing_tests if t not in new_failing]
+            improvement_tracking.append({"iteration": iteration, "fixed_tests": fixed})
+
+            failing_tests = new_failing
+            parsed_results = new_results
+            summary_lines = []
+            if parsed_results["failed"]:
+                summary_lines.append("Failing tests:")
+                summary_lines.extend(f"- {name}" for name in parsed_results["failed"])
+            if parsed_results["error"]:
+                summary_lines.append("Errored tests:")
+                summary_lines.extend(f"- {name}" for name in parsed_results["error"])
+            test_summary = "\n".join(summary_lines)
+            analysis = analyze_test_results(test_output)
+            analysis_summary = "\n".join(
+                f"{item['test']}: {item['error']} (priority {item['priority']})" for item in analysis
+            )
+            iteration += 1
+
+        metadata['improvement_tracking'] = improvement_tracking
+
 
         # Copy results back
         copy_from_container(container, "/app/model_patch.txt", os.path.join(output_dir, "model_patch.txt"))

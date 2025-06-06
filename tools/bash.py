@@ -64,6 +64,10 @@ class BashSession:
             raise ValueError(
                 f"Timed out: bash has not returned in {self._timeout} seconds and must be restarted."
             )
+
+        # Clear any leftover output before sending the command
+        self._process.stdout._buffer.clear()
+        self._process.stderr._buffer.clear()
         
         # Send command
         self._process.stdin.write(
