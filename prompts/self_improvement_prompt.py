@@ -119,7 +119,25 @@ In <JSON>, provide a JSON response with the following fields:
 
 Your response will be automatically parsed, so ensure that the string response is precisely in the correct format. Do NOT include the `<JSON>` tag in your output."""
 
-diagnose_prompt_emptypatches = """There are some empty patches when attempting to solve GitHub issues. Since the coding agent is stochastic, it may not always produce a patch. Handle cases where the coding agent fails to generate a patch or generates one that only modifies the test cases without editing the primary source code. For example, the simplest solution is to ask the agent to try again.
+diagnose_prompt_emptypatches = """The coding agent needs to improve its core problem-solving abilities. Focus on enhancing the agent's ability to:
+1. Analyze complex problems and break them down into solvable components
+2. Generate and evaluate multiple solution approaches
+3. Learn from previous attempts and incorporate feedback
+4. Handle edge cases and error conditions more effectively
+5. Improve code quality and maintainability
+
+Your improvement must be concrete and implementable. It should:
+- Add new functionality or modify existing code
+- Include specific code changes or new files to create
+- Demonstrate how it improves the agent's capabilities
+- Be testable and verifiable
+
+For example, valid improvements include:
+- Adding a new tool for analyzing code complexity
+- Implementing a feedback loop system
+- Creating a solution caching mechanism
+- Adding error handling and recovery strategies
+- Implementing a learning mechanism from past solutions
 
 Respond precisely in the following format including the JSON start and end markers:
 
@@ -128,10 +146,18 @@ Respond precisely in the following format including the JSON start and end marke
 ```
 
 In <JSON>, provide a JSON response with the following fields:
-- "potential_improvements": Identify potential improvements to the coding agent's system. All necessary dependencies and environment setup have already been handled, so do not focus on these aspects.
-- "improvement_proposal": Choose ONE high-impact improvement from the identified potential improvements and describe it in detail. This should be a focused and comprehensive plan to enhance the agent's overall coding ability.
-- "implementation_suggestion": Referring to the coding agent's summary and implementation, think critically about what feature could be added or improved to best implement the proposed improvement.
-- "problem_description": Phrase the improvement proposal and implementation suggestion as a GitHub issue description. It should clearly describe the feature so that a software engineer viewing the issue and the repository can implement it.
+- "potential_improvements": List specific, implementable improvements that would enhance the agent's problem-solving abilities. Each improvement should be concrete and include code-level details.
+- "improvement_proposal": Choose ONE high-impact improvement that would significantly enhance the agent's problem-solving abilities. Include specific code changes or new files to create.
+- "implementation_suggestion": Provide detailed implementation steps, including:
+  * New files to create or existing files to modify
+  * Specific code changes with line numbers
+  * Integration points with existing code
+  * Testing strategy
+- "problem_description": Describe the improvement as a concrete task with:
+  * Clear success criteria
+  * Implementation requirements
+  * Testing requirements
+  * Expected impact on agent capabilities
 
 Your response will be automatically parsed, so ensure that the string response is precisely in the correct format. Do NOT include the `<JSON>` tag in your output."""
 
@@ -314,8 +340,8 @@ def get_diagnose_prompt_swe(entry_id, commit, root_dir, out_dir, dataset, patch_
         diagnose_prompt_out = diagnose_prompt_contextlength
     else:
         # Get user prompt for the entry
-        md_logs, eval_logs, predicted_patches = find_selfimprove_eval_logs(entry_id, out_dir, commit_id=commit)
-        md_log, eval_log, predicted_patch = process_selfimprove_eval_logs(md_logs, eval_logs, predicted_patches)
+        md_logs, eval_logs, predicted_patches, eval_results = find_selfimprove_eval_logs(entry_id, out_dir, commit_id=commit)
+        md_log, eval_log, predicted_patch, eval_result = process_selfimprove_eval_logs(md_logs, eval_logs, predicted_patches, eval_results)
         entry = next((e for e in dataset if e['instance_id'] == entry_id), None)
         answer_patch = entry['patch']
         test_patch = entry['test_patch']

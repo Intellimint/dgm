@@ -1,0 +1,6 @@
+usage: self_improve_step.py [-h] [--parent_commit PARENT_COMMIT]
+                            [--output_dir OUTPUT_DIR] [--force_rebuild]
+                            [--num_evals NUM_EVALS]
+                            [--no_post_improve_diagnose] [--entry ENTRY]
+                            [--test_task_list TEST_TASK_LIST]
+self_improve_step.py: error: unrecognized arguments: --polyglot

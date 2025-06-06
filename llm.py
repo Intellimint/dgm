@@ -59,14 +59,9 @@ def create_client(model: str):
         print(f"Using Anthropic API with model {model}.")
         return anthropic.Anthropic(), model
     elif model.startswith("bedrock") and "claude" in model:
-        client_model = model.split("/")[-1]
-        print(f"Using Amazon Bedrock with model {client_model}.")
-        client = anthropic.AnthropicBedrock(
-            aws_access_key=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            aws_region=os.getenv("AWS_REGION_NAME"),
-        )
-        return client, client_model
+        # Use DeepSeek R1 0528 via OpenRouter instead of AWS Bedrock
+        print(f"Using OpenRouter with model deepseek/deepseek-r1-0528:free.")
+        return "requests", "deepseek/deepseek-r1-0528:free"
     elif model.startswith("vertex_ai") and "claude" in model:
         client_model = model.split("/")[-1]
         print(f"Using Vertex AI with model {client_model}.")
@@ -82,11 +77,12 @@ def create_client(model: str):
         )
         return client, model
     elif model == "llama3.1-405b":
-        print(f"Using OpenAI API with {model}.")
+        print(f"Using OpenRouter with {model}.")
         client = openai.OpenAI(
             api_key=os.environ["OPENROUTER_API_KEY"],
             base_url="https://openrouter.ai/api/v1"
-        ), model
+        )
+        return client, model
     elif model == "deepseek/deepseek-r1-0528:free":
         print("Using requests for DeepSeek-R1-0528 via OpenRouter.")
         return "requests", model
@@ -160,18 +156,22 @@ def get_batch_responses_from_llm(
             "messages": [
                 {"role": "system", "content": system_message},
                 *new_msg_history,
-            ]
+            ],
+            "temperature": temperature,
+            "max_tokens": MAX_OUTPUT_TOKENS
         }
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
-            data=json.dumps(payload)
+            json=payload
         )
         result = response.json()
-        content = [result["choices"][0]["message"]["content"]]
-        new_msg_history = [
-            new_msg_history + [{"role": "assistant", "content": content[0]}]
-        ]
+        if "choices" not in result:
+            raise ValueError(f"Unexpected response format from OpenRouter: {result}")
+        content = [choice["message"]["content"] for choice in result["choices"]]
+        # Join multiple responses with newlines if there are multiple
+        content = "\n".join(content) if isinstance(content, list) else content
+        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     else:
         content, new_msg_history = [], []
         for _ in range(n_responses):
@@ -225,7 +225,36 @@ def get_response_from_llm(
             logger.warning("atlas_sysprompt.txt not found, using default system message")
             system_message = "You are a helpful AI assistant."
 
-    if "claude" in model:
+    if model == "deepseek/deepseek-r1-0528:free":
+        new_msg_history = msg_history + [{"role": "user", "content": msg}]
+        headers = {
+            "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/AtlasInfinity/dgm",  # Optional
+            "X-Title": "DGM",  # Optional
+        }
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_message},
+                *new_msg_history,
+            ],
+            "temperature": temperature,
+            "max_tokens": MAX_OUTPUT_TOKENS
+        }
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=payload
+        )
+        result = response.json()
+        if "choices" not in result:
+            raise ValueError(f"Unexpected response format from OpenRouter: {result}")
+        content = [choice["message"]["content"] for choice in result["choices"]]
+        # Join multiple responses with newlines if there are multiple
+        content = "\n".join(content) if isinstance(content, list) else content
+        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
+    elif "claude" in model:
         new_msg_history = msg_history + [
             {
                 "role": "user",
@@ -335,29 +364,6 @@ def get_response_from_llm(
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
         resoning_content = response.choices[0].message.reasoning_content
-    elif model == "deepseek/deepseek-r1-0528:free":
-        new_msg_history = msg_history + [{"role": "user", "content": msg}]
-        headers = {
-            "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://yourdomain.com",  # Optional
-            "X-Title": "YourAppName",  # Optional
-        }
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_message},
-                *new_msg_history,
-            ]
-        }
-        response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            data=json.dumps(payload)
-        )
-        result = response.json()
-        content = result["choices"][0]["message"]["content"]
-        new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
     else:
         raise ValueError(f"Model {model} not supported.")
     if print_debug:

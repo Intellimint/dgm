@@ -1,0 +1,26 @@
+2025-05-31 00:38:33,421 - selfimprove_logger_8677455936 - INFO - No existing container with name dgm-container-20250531_003833_412531 found.
+2025-05-31 00:38:33,421 - selfimprove_logger_8677455936 - INFO - Building the Docker image...
+Traceback (most recent call last):
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/self_improve_step.py", line 461, in <module>
+    main()
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/self_improve_step.py", line 449, in main
+    metadata = self_improve(
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/self_improve_step.py", line 270, in self_improve
+    container = build_dgm_container(
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/utils/docker_utils.py", line 118, in build_dgm_container
+    image, logs = client.images.build(path=repo_path, tag=image_name, rm=True)
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/venv/lib/python3.10/site-packages/docker/models/images.py", line 296, in build
+    resp = self.client.api.build(**kwargs)
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/venv/lib/python3.10/site-packages/docker/api/build.py", line 159, in build
+    context = utils.tar(
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/venv/lib/python3.10/site-packages/docker/utils/build.py", line 35, in tar
+    return create_archive(
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/venv/lib/python3.10/site-packages/docker/utils/build.py", line 103, in create_archive
+    t.addfile(i, f)
+  File "/Users/satoshinakamoto/.pyenv/versions/3.10.14/lib/python3.10/tarfile.py", line 2202, in addfile
+    buf = tarinfo.tobuf(self.format, self.encoding, self.errors)
+  File "/Users/satoshinakamoto/.pyenv/versions/3.10.14/lib/python3.10/tarfile.py", line 993, in tobuf
+    return self.create_pax_header(info, encoding)
+  File "/Users/satoshinakamoto/.pyenv/versions/3.10.14/lib/python3.10/tarfile.py", line 1060, in create_pax_header
+    if not 0 <= val_int < 8 ** (digits - 1):
+KeyboardInterrupt

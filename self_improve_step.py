@@ -25,7 +25,7 @@ from utils.docker_utils import (
 )
 
 dataset = None
-diagnose_model = 'o1-2024-12-17'
+diagnose_model = 'deepseek/deepseek-r1-0528:free'
 
 def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attempts=3, polyglot=False):
     client = create_client(diagnose_model)
@@ -236,7 +236,6 @@ def self_improve(
     run_baseline=None,
     polyglot=False
 ):  
-
     global dataset
     if polyglot:
         with open("polyglot/polyglot_benchmark_metadata.json") as f:
@@ -248,176 +247,153 @@ def self_improve(
 
     # Variables for this self-improvement attempt
     metadata = {}
-    root_dir = os.path.abspath('./')  # root_dir should be /dgm
-    run_id = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
-    out_dir_base = output_dir  # out_dir_base should be /dgm/output_selfimprove/ or /dgm/output_dgm/{dgm_run_id}/
-    output_dir = os.path.join(root_dir, f"{output_dir}/{run_id}/")
-    os.makedirs(output_dir, exist_ok=True)
+    run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     metadata['run_id'] = run_id
     metadata['parent_commit'] = parent_commit
-    test_task_list_big = load_json_file("./swe_bench/subsets/big.json")
-
-    # Set up logger
-    logger = setup_logger(os.path.join(output_dir, "self_improve.log"))
-
-    # Create and start the Docker container
-    image_name = "dgm"
-    container_name = f"dgm-container-{run_id}"
-    client = docker.from_env()
-    # Remove any existing container with the same name
-    remove_existing_container(client, container_name)
-    # Now create and start the container
-    container = build_dgm_container(
-        client, root_dir, image_name, container_name,
-        force_rebuild=force_rebuild,
-    )
-    container.start()
-
-    if polyglot:
-        # remove the swe version of coding_agent.py
-        exec_result = container.exec_run("rm /dgm/coding_agent.py", workdir='/')
-        log_container_output(exec_result)
-        # rename coding_agent_polyglot.py to coding_agent.py
-        exec_result = container.exec_run("mv /dgm/coding_agent_polyglot.py /dgm/coding_agent.py", workdir='/')
-        log_container_output(exec_result)
-        # remove swe-specific files utils/eval_utils.py and utils/swe_log_parsers.py
-        exec_result = container.exec_run("rm /dgm/utils/eval_utils.py", workdir='/')
-        log_container_output(exec_result)
-        exec_result = container.exec_run("rm /dgm/utils/swe_log_parsers.py", workdir='/')
-        log_container_output(exec_result)
-    else:
-        # remove the polyglot version of coding_agent.py
-        exec_result = container.exec_run("rm /dgm/coding_agent_polyglot.py", workdir='/')
-
-    # Find all parent patches and apply them
-    patch_files = get_model_patch_paths(root_dir, os.path.join(output_dir, '../'), parent_commit)
-    if run_baseline not in ['no_selfimprove']:
-        for patch_file in patch_files:
-            copy_to_container(container, patch_file, '/dgm/parent_patch.txt')
-            exec_result = container.exec_run("/bin/sh -c 'patch -p1 < /dgm/parent_patch.txt'", workdir='/dgm')
-            log_container_output(exec_result)
-            exec_result = container.exec_run("rm /dgm/parent_patch.txt", workdir='/dgm')
-            log_container_output(exec_result)
-
-    # Commit this version of dgm, so that irrelevant changes are not included in the patch
-    exec_result = container.exec_run("git add --all", workdir='/dgm/')
-    log_container_output(exec_result)
-    exec_result = container.exec_run("git -c user.name='user' -c user.email='you@example.com' commit -m 'a nonsense commit message'", workdir='/dgm/')
-    log_container_output(exec_result)
-    commit_output = exec_result.output.decode('utf-8')
-    # Git commit output format: `[master (root-commit) <hash>] a nonsense commit message`
-    commit_hash = commit_output.split()[1].strip("[]")  # Extract the hash part
-
-    # Install requirements again in case of any changes
-    exec_result = container.exec_run("python -m pip install -r /dgm/requirements.txt", workdir='/')
-    log_container_output(exec_result)
-
-    # Get tasks to improve
-    if entry:
-        safe_log(f"Task to improve: {entry}")
-        problem_statement = diagnose_problem(entry, parent_commit, root_dir, out_dir_base, patch_files=patch_files, polyglot=polyglot)
-        safe_log(f"problem_statement: {problem_statement}")
-    else:
-        safe_log("No entry provided. Exiting.")
-        cleanup_container(container)
-        save_metadata(metadata, output_dir)
-        return metadata
-
     metadata['entry'] = entry
-    metadata['problem_statement'] = problem_statement
-    # If problem statement is not found, exit
-    if not problem_statement:
-        safe_log("Failed to diagnose the problem statement. Exiting.")
-        cleanup_container(container)
-        save_metadata(metadata, output_dir)
-        return metadata
+    metadata['test_task_list'] = test_task_list
+    metadata['test_more_threshold'] = test_more_threshold
+    metadata['test_task_list_more'] = test_task_list_more
+    metadata['full_eval_threshold'] = full_eval_threshold
+    metadata['run_baseline'] = run_baseline
+    metadata['polyglot'] = polyglot
 
-    # Run self-improvement
-    safe_log("Running self-improvement")
-    chat_history_file_container = "/dgm/self_evo.md"
-    test_description = get_test_description(swerepo=False)
-    env_vars = {
-        "ANTHROPIC_API_KEY": os.getenv('ANTHROPIC_API_KEY'),
-        "AWS_REGION": os.getenv('AWS_REGION'),
-        "AWS_REGION_NAME": os.getenv('AWS_REGION_NAME'),
-        "AWS_ACCESS_KEY_ID": os.getenv('AWS_ACCESS_KEY_ID'),
-        "AWS_SECRET_ACCESS_KEY": os.getenv('AWS_SECRET_ACCESS_KEY'),
-        "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
-    }
-    cmd = [
-        "timeout", "1800",  # 30min timeout
-        "python", "/dgm/coding_agent.py",
-        "--problem_statement", problem_statement,
-        "--git_dir", "/dgm/",
-        "--chat_history_file", chat_history_file_container,
-        "--base_commit", commit_hash,
-        "--outdir", "/dgm/",
-        "--test_description", test_description,
-        "--self_improve",
-    ]
-    exec_result = container.exec_run(cmd, environment=env_vars, workdir='/')
-    log_container_output(exec_result)
+    # Create output directory
+    output_dir = os.path.join(output_dir, f"run_{run_id}")
+    os.makedirs(output_dir, exist_ok=True)
 
-    # Copy output files back to host
-    chat_history_file = os.path.join(output_dir, "self_evo.md")
-    copy_from_container(container, chat_history_file_container, chat_history_file)
-    model_patch_file = os.path.join(output_dir, "model_patch.diff")
-    copy_from_container(container, "/dgm/model_patch.diff", model_patch_file)
-
-    # Try reading the patch file to validate it
-    try:
-        # Check if patch file exists and is not empty
-        if not os.path.exists(model_patch_file):
-            raise Exception("Model patch file is empty or does not exist")
-        with open(model_patch_file, 'r') as f:
-            patch_content = f.read()
-            if not patch_content.strip():
-                raise Exception("Model patch file is empty")
-    except Exception as e:
-        safe_log(f"Failed to read model patch file: {str(e)}")
-        save_metadata(metadata, output_dir)
-        return metadata
-
-    patch_files.append(model_patch_file)
-
-    # Stop and remove the container
-    cleanup_container(container)
-
-    # Evaluate the performance of the self-improvement
-    model_patch_exists = os.path.exists(model_patch_file)
-    metadata['model_patch_exists'] = model_patch_exists
-    model_patch_notempty = os.path.getsize(model_patch_file) > 0
-    metadata['model_patch_notempty'] = model_patch_notempty
-    model_name_or_path = run_id
-    if model_patch_exists and model_patch_notempty:
-        try:
-            if not polyglot:
-                run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more)
-            else:
-                run_harness_polyglot(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more)
-        except Exception as e:
-            safe_log(f"Error while evaluating the self-improvement: {e}")
-
-    # Post-self-improvement diagnosis
-    if post_improve_diagnose:
-        safe_log("Diagnosing the self-improvement")
-        metadata['is_compiled'] = is_compiled_self_improve(metadata)
-        if metadata['is_compiled']:
-            safe_log("The self-improvement succeed to be complied")
-            improvement_diagnosis = diagnose_improvement(
-                entry, parent_commit, root_dir,
-                model_patch_file, out_dir_base, run_id,
-                patch_files=patch_files,
-            )
-            metadata['improvement_diagnosis'] = improvement_diagnosis
-            safe_log(f"Improvement diagnosis: {improvement_diagnosis}")
-        else:
-            safe_log("The self-improvement fail to be complied")
-            metadata['improvement_diagnosis'] = "Fail to complied. Ignore this."
-
-    # Save metadata of this self-improvement attempt
+    # Save metadata
     save_metadata(metadata, output_dir)
-    return metadata
+
+    # Initialize Docker client
+    try:
+        client = docker.from_env()
+        safe_log("Docker client initialized successfully")
+    except Exception as e:
+        safe_log(f"Failed to initialize Docker client: {e}")
+        return None
+
+    # Build container
+    try:
+        container = build_dgm_container(client=client, force_rebuild=force_rebuild)
+        if container is None:
+            safe_log("Failed to build container")
+            return None
+        safe_log("Container built successfully")
+    except Exception as e:
+        safe_log(f"Error building container: {e}")
+        return None
+
+    try:
+        # Copy files to container
+        safe_log("Copying files to container...")
+        copy_to_container(container, "coding_agent.py", "/app/coding_agent.py")
+        copy_to_container(container, "test_problem.py", "/app/test_problem.py")
+        copy_to_container(container, "graph_traversal.py", "/app/graph_traversal.py")
+        copy_to_container(container, "tools/", "/app/tools/")
+        copy_to_container(container, "utils/", "/app/utils/")
+        copy_to_container(container, "prompts/", "/app/prompts/")
+        safe_log("Files copied successfully")
+
+        # Run the test problem and capture results
+        safe_log("Running test problem...")
+        exit_code, output = container.exec_run(
+            "python -m pytest test_problem.py -v",
+            workdir="/app"
+        )
+        test_output = output.decode()
+        safe_log(f"Test output: {test_output}")
+
+        # Save test results
+        test_results_file = os.path.join(output_dir, "test_results.txt")
+        with open(test_results_file, "w") as f:
+            f.write(test_output)
+
+        # Get the problem description with test results context
+        safe_log("Getting problem description...")
+        problem_statement = diagnose_problem(
+            entry, parent_commit, "/app", output_dir,
+            patch_files=[], polyglot=polyglot
+        )
+        if problem_statement is None:
+            safe_log("Failed to get problem statement")
+            return None
+
+        # Enhance problem statement with test results
+        enhanced_problem = f"""Problem Statement:
+{problem_statement}
+
+Test Results:
+{test_output}
+
+Based on these test results, please identify specific areas for improvement in the code and implement those improvements. Focus on:
+1. Performance optimizations
+2. Edge case handling
+3. Code maintainability
+4. Algorithm efficiency
+5. Error handling
+
+Provide concrete, implementable improvements that address the issues found in the test results."""
+
+        # Save enhanced problem statement
+        with open(os.path.join(output_dir, "enhanced_problem_statement.txt"), "w") as f:
+            f.write(enhanced_problem)
+
+        # Copy enhanced problem statement to container
+        copy_to_container(container, os.path.join(output_dir, "enhanced_problem_statement.txt"), "/app/enhanced_problem_statement.txt")
+
+        # Run the improvement with enhanced problem statement
+        safe_log("Running improvement...")
+        exit_code, output = container.exec_run(
+            f"python coding_agent.py --problem_statement_file enhanced_problem_statement.txt",
+            workdir="/app"
+        )
+        improvement_output = output.decode()
+        safe_log(f"Improvement output: {improvement_output}")
+
+        # Copy results back
+        copy_from_container(container, "/app/model_patch.txt", os.path.join(output_dir, "model_patch.txt"))
+        copy_from_container(container, "/app/coding_agent.py", os.path.join(output_dir, "coding_agent.py"))
+
+        # Run evaluation
+        if polyglot:
+            run_harness_polyglot(
+                entry, "coding_agent.py",
+                [os.path.join(output_dir, "model_patch.txt")],
+                num_evals, output_dir, metadata, run_id,
+                test_more_threshold, test_task_list, test_task_list_more
+            )
+        else:
+            run_harness_swe(
+                entry, "coding_agent.py",
+                [os.path.join(output_dir, "model_patch.txt")],
+                num_evals, output_dir, metadata, run_id,
+                test_more_threshold, test_task_list, test_task_list_more
+            )
+
+        # Diagnose improvement
+        if post_improve_diagnose:
+            improvement_diagnosis = diagnose_improvement(
+                entry, parent_commit, "/app",
+                os.path.join(output_dir, "model_patch.txt"),
+                output_dir, run_id, patch_files=[]
+            )
+            if improvement_diagnosis:
+                metadata['improvement_diagnosis'] = improvement_diagnosis
+                save_metadata(metadata, output_dir)
+
+    except Exception as e:
+        safe_log(f"Error during self-improvement process: {e}")
+        return None
+    finally:
+        # Cleanup
+        try:
+            cleanup_container(container)
+            remove_existing_container()
+        except Exception as e:
+            safe_log(f"Error during cleanup: {e}")
+
+    return output_dir
 
 def main():
     parser = argparse.ArgumentParser(description="Self-improvement step for the repository.")
@@ -428,6 +404,7 @@ def main():
     parser.add_argument('--no_post_improve_diagnose', default=False, action='store_true', help='Skip diagnosing the self-improvement after evaluation')
     parser.add_argument('--entry', default="django__django-10999", type=str, help='Task entry to improve')
     parser.add_argument('--test_task_list', default=None, type=str, help='List of tasks to evaluate the self-improvement')
+    parser.add_argument('--polyglot', default=False, action='store_true', help='Run in polyglot mode')
     args = parser.parse_args()
 
     # Copy cached initial version into experiment dir
@@ -441,6 +418,7 @@ def main():
         post_improve_diagnose=not args.no_post_improve_diagnose,
         entry=args.entry,
         test_task_list=args.test_task_list,
+        polyglot=args.polyglot,
     )
 
 if __name__ == "__main__":

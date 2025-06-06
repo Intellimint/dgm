@@ -1,0 +1,36 @@
+Warning: No logger found for thread 8677455936
+Warning: No logger found for thread 8677455936
+Traceback (most recent call last):
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/self_improve_step.py", line 425, in <module>
+    main()
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/self_improve_step.py", line 413, in main
+    metadata = self_improve(
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/self_improve_step.py", line 278, in self_improve
+    container = build_dgm_container(client=client, force_rebuild=force_rebuild)
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/utils/docker_utils.py", line 118, in build_dgm_container
+    image, logs = client.images.build(path=repo_path, tag=image_name, rm=True)
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/venv/lib/python3.10/site-packages/docker/models/images.py", line 302, in build
+    for chunk in internal_stream:
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/venv/lib/python3.10/site-packages/docker/utils/json_stream.py", line 60, in split_buffer
+    for data in stream_as_text(stream):
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/venv/lib/python3.10/site-packages/docker/utils/json_stream.py", line 16, in stream_as_text
+    for data in stream:
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/venv/lib/python3.10/site-packages/docker/api/client.py", line 365, in _stream_helper
+    data = reader.read(1)
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/venv/lib/python3.10/site-packages/urllib3/response.py", line 955, in read
+    data = self._raw_read(amt)
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/venv/lib/python3.10/site-packages/urllib3/response.py", line 879, in _raw_read
+    data = self._fp_read(amt, read1=read1) if not fp_closed else b""
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/venv/lib/python3.10/site-packages/urllib3/response.py", line 862, in _fp_read
+    return self._fp.read(amt) if amt is not None else self._fp.read()
+  File "/Users/satoshinakamoto/.pyenv/versions/3.10.14/lib/python3.10/http/client.py", line 460, in read
+    return self._read_chunked(amt)
+  File "/Users/satoshinakamoto/.pyenv/versions/3.10.14/lib/python3.10/http/client.py", line 583, in _read_chunked
+    chunk_left = self._get_chunk_left()
+  File "/Users/satoshinakamoto/.pyenv/versions/3.10.14/lib/python3.10/http/client.py", line 566, in _get_chunk_left
+    chunk_left = self._read_next_chunk_size()
+  File "/Users/satoshinakamoto/.pyenv/versions/3.10.14/lib/python3.10/http/client.py", line 526, in _read_next_chunk_size
+    line = self.fp.readline(_MAXLINE + 1)
+  File "/Users/satoshinakamoto/.pyenv/versions/3.10.14/lib/python3.10/socket.py", line 705, in readinto
+    return self._sock.recv_into(b)
+KeyboardInterrupt

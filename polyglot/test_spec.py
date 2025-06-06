@@ -21,10 +21,7 @@ from polyglot.dockerfiles import (
     get_dockerfile_env,
     get_dockerfile_instance,
 )
-from swebench.harness.utils import (
-    get_requirements,
-    get_environment_yml,
-)
+from swe_bench.utils import get_requirements, get_environment_yml
 
 DIFF_MODIFIED_FILE_REGEX = r"--- a/(.*)"
 

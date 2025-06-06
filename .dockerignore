@@ -31,7 +31,6 @@ requirements_dev.txt
 <!-- code outside of coding agent -->
 test_swebench.py
 DGM_outer.py
-self_improve_step.py
 analysis/
 prompts/self_improvement_prompt.py
 prompts/diagnose_improvement_prompt.py

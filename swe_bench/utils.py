@@ -231,3 +231,23 @@ def log_container_output(exec_result, raise_error=True):
             error_msg = f"Script failed with exit code {exec_result.exit_code}"
             safe_log(error_msg, logging.ERROR)
             raise Exception(error_msg)
+
+# --- Added from SWE-bench official repo ---
+def get_requirements(instance):
+    """Extract requirements.txt content from a SWE-bench instance."""
+    if "requirements" in instance:
+        return instance["requirements"]
+    if "requirements_txt" in instance:
+        return instance["requirements_txt"]
+    raise ValueError("No requirements found in instance.")
+
+def get_environment_yml(instance, env_name):
+    """Extract environment.yml content from a SWE-bench instance and set the environment name."""
+    if "environment_yml" in instance:
+        yml = instance["environment_yml"]
+        # Replace the name field with env_name
+        import re
+        yml = re.sub(r"name:.*", f"name: {env_name}", yml)
+        return yml
+    raise ValueError("No environment.yml found in instance.")
+# --- END ---

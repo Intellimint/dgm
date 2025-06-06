@@ -8,7 +8,7 @@ import docker
 from datasets import load_dataset
 
 from prompts.testrepo_prompt import get_test_description
-from swebench.harness.test_spec import make_test_spec
+from polyglot.test_spec import make_test_spec
 from swebench.harness.docker_build import build_env_images, build_container, cleanup_container
 
 from swe_bench.utils import (

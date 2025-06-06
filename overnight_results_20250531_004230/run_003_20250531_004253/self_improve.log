@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/self_improve_step.py", line 401, in <module>
+    main()
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/self_improve_step.py", line 389, in main
+    metadata = self_improve(
+  File "/Users/satoshinakamoto/Documents/AtlasInfinity/dgm/self_improve_step.py", line 269, in self_improve
+    container = build_dgm_container(force_rebuild=force_rebuild)
+TypeError: build_dgm_container() missing 1 required positional argument: 'client'
