@@ -170,35 +170,53 @@ Your task is to make changes to the files in the {self.git_tempdir} directory to
 
 def main():
     parser = argparse.ArgumentParser(description='Process repository with an agentic system.')
-    parser.add_argument('--problem_statement', required=True, help='The problem statement to process')
+    parser.add_argument('--problem_statement', required=False, help='The problem statement to process')
+    parser.add_argument('--problem_statement_file', required=False, help='Path to file containing the problem statement')
     parser.add_argument('--git_dir', required=True, help='Path to git repository directory')
     parser.add_argument('--base_commit', required=True, help='Base commit hash to compare against')
     parser.add_argument('--chat_history_file', required=True, help='Path to chat history file')
     parser.add_argument('--outdir', required=False, default="/dgm/", help='Output directory')
     parser.add_argument('--test_description', default=None, required=False, help='Description of how to test the repository')
     parser.add_argument('--self_improve', default=False, action='store_true', help='Whether to self-improve the repository or solving swe')
+    parser.add_argument('--verify_command', default=None, help='Command used to verify the repository after applying changes')
+    parser.add_argument('--max_iters', type=int, default=1, help='Maximum improvement iterations')
     parser.add_argument('--instance_id', default=None, help='Instance ID for SWE issue')
     args = parser.parse_args()
 
-    # Process the repository
-    agentic_system = AgenticSystem(
-        problem_statement=args.problem_statement,
-        git_tempdir=args.git_dir,
-        base_commit=args.base_commit,
-        chat_history_file=args.chat_history_file,
-        test_description=args.test_description,
-        self_improve=args.self_improve,
-        instance_id=args.instance_id,
-    )
+    if args.problem_statement_file and not args.problem_statement:
+        with open(args.problem_statement_file, 'r') as f:
+            args.problem_statement = f.read()
 
-    # Run the agentic system to try to solve the problem
-    agentic_system.forward()
+    iteration = 0
+    final_patch = ''
+    while iteration < args.max_iters:
+        reset_to_commit(args.git_dir, args.base_commit)
+        agentic_system = AgenticSystem(
+            problem_statement=args.problem_statement,
+            git_tempdir=args.git_dir,
+            base_commit=args.base_commit,
+            chat_history_file=args.chat_history_file,
+            test_description=args.test_description,
+            self_improve=args.self_improve,
+            instance_id=args.instance_id,
+        )
 
-    # Get code diff and save to model_patch.diff
-    model_patch = diff_versus_commit(args.git_dir, args.base_commit)
+        agentic_system.forward()
+
+        model_patch = diff_versus_commit(args.git_dir, args.base_commit)
+        final_patch = model_patch
+
+        if args.verify_command:
+            verify = subprocess.run(args.verify_command, shell=True, cwd=args.git_dir, capture_output=True, text=True)
+            safe_log(f"Verify output (iteration {iteration+1}): {verify.stdout}")
+            if verify.returncode == 0:
+                break
+
+        iteration += 1
+
     model_patch_outfile = os.path.join(args.outdir, 'model_patch.diff') if args.outdir else 'model_patch.diff'
     with open(model_patch_outfile, 'w') as f:
-        f.write(model_patch)
+        f.write(final_patch)
 
 if __name__ == "__main__":
     main()

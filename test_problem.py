@@ -84,8 +84,8 @@ class TestNetworkOptimization(unittest.TestCase):
         }
         constraints = {'max_cost': 6, 'max_nodes': 4}
         cost, path = solve_network_optimization(network, 'A', 'D', constraints)
-        self.assertEqual(cost, 5)
-        self.assertEqual(path, ['A', 'C', 'D'])
+        self.assertEqual(cost, 5, f"Expected cost 5 but got {cost}")
+        self.assertEqual(path, ['A', 'C', 'D'], f"Unexpected path {path}")
 
     def test_no_valid_path(self):
         network = {
@@ -94,7 +94,7 @@ class TestNetworkOptimization(unittest.TestCase):
             'C': []
         }
         constraints = {'max_cost': 4, 'required_nodes': ['D']}
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError, msg="Expected ValueError for missing required node"):
             solve_network_optimization(network, 'A', 'C', constraints)
 
     def test_complex_constraints(self):
@@ -114,10 +114,10 @@ class TestNetworkOptimization(unittest.TestCase):
             'avoid_nodes': ['D']
         }
         cost, path = solve_network_optimization(network, 'A', 'G', constraints)
-        self.assertLessEqual(cost, 8)
-        self.assertLessEqual(len(path), 5)
-        self.assertIn('E', path)
-        self.assertNotIn('D', path)
+        self.assertLessEqual(cost, 8, f"Path cost {cost} exceeds limit")
+        self.assertLessEqual(len(path), 5, f"Path length {len(path)} exceeds limit")
+        self.assertIn('E', path, "Required node E missing from path")
+        self.assertNotIn('D', path, "Avoid node D present in path")
 
     def test_learning_from_feedback(self):
         # Test that the solution improves when given feedback about failed attempts
@@ -137,7 +137,7 @@ class TestNetworkOptimization(unittest.TestCase):
         cost2, path2 = solve_network_optimization(network, 'A', 'E', constraints)
         
         # The second attempt should be at least as good as the first
-        self.assertLessEqual(cost2, cost1)
+        self.assertLessEqual(cost2, cost1, "Second attempt did not improve cost")
 
 if __name__ == '__main__':
     unittest.main() 
